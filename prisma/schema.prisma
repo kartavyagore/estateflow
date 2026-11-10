@@ -1,0 +1,470 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OrgStatus {
+  ACTIVE
+  PENDING
+  SUSPENDED
+  ARCHIVED
+}
+
+enum MemberRole {
+  OWNER
+  SALES_MANAGER
+  SALESPERSON
+}
+
+enum MemberStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum SubStatus {
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  CANCELED
+}
+
+enum LeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  SITE_VISIT_SCHEDULED
+  SITE_VISIT_COMPLETED
+  NEGOTIATION
+  BOOKING_IN_PROGRESS
+  WON_BOOKED
+  LOST
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String
+  phone         String?
+  avatarUrl     String?
+  isSuperAdmin  Boolean   @default(false)
+  status        String    @default("ACTIVE")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  memberships   OrganizationMembership[]
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Organization {
+  id            String       @id @default(cuid())
+  name          String
+  slug          String       @unique
+  businessType  String?
+  businessEmail String?
+  phone         String?
+  website       String?
+  address       String?
+  city          String?
+  state         String?
+  country       String?
+  status        OrgStatus    @default(ACTIVE)
+  customDomain  String?      @unique
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  branding         TenantBranding?
+  subscription     OrganizationSubscription?
+  members          OrganizationMembership[]
+  invitations      Invitation[]
+  projects         Project[]
+  leads            Lead[]
+  metaConnections  MetaConnection[]
+  webhookEvents    WebhookEvent[]
+  auditLogs        AuditLog[]
+  assignmentRules  AssignmentRule[]
+  notifications    Notification[]
+
+  @@index([slug])
+  @@index([status])
+  @@map("organizations")
+}
+
+model TenantBranding {
+  id             String       @id @default(cuid())
+  organizationId String       @unique
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  logoUrl        String?
+  lightLogoUrl   String?
+  darkLogoUrl    String?
+  faviconUrl     String?
+  primaryColor   String       @default("#2563EB")
+  secondaryColor String       @default("#1E40AF")
+  accentColor    String       @default("#EA580C")
+  welcomeMessage String?
+  supportEmail   String?
+  supportPhone   String?
+  updatedAt      DateTime     @updatedAt
+
+  @@map("tenant_brandings")
+}
+
+model OrganizationMembership {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           MemberRole    @default(SALESPERSON)
+  status         MemberStatus  @default(ACTIVE)
+  capacity       Int           @default(50)
+  isAvailable    Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  assignedLeads     Lead[]           @relation("AssignedLeads")
+  leadAssignments   LeadAssignment[] @relation("MemberAssignments")
+  activities        LeadActivity[]
+  followUpTasks     FollowUpTask[]
+  siteVisits        SiteVisit[]
+  bookings          Booking[]
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, role])
+  @@map("organization_memberships")
+}
+
+model Invitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           MemberRole   @default(SALESPERSON)
+  token          String       @unique
+  invitedById    String?
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@index([token])
+  @@map("invitations")
+}
+
+model SubscriptionPlan {
+  id             String    @id @default(cuid())
+  name           String    @unique
+  displayName    String
+  description    String
+  priceMonthly   Float     @default(0)
+  maxEmployees   Int       @default(5)
+  maxMonthlyLeads Int      @default(200)
+  features       String    @default("[]")
+  isPopular      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+
+  subscriptions  OrganizationSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model OrganizationSubscription {
+  id                 String           @id @default(cuid())
+  organizationId     String           @unique
+  organization       Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  planId             String
+  plan               SubscriptionPlan @relation(fields: [planId], references: [id])
+  status             SubStatus        @default(TRIAL)
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime         @default(now())
+  currentPeriodEnd   DateTime
+  leadsUsedThisMonth Int              @default(0)
+  updatedAt          DateTime         @updatedAt
+
+  @@map("organization_subscriptions")
+}
+
+model Project {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  code           String?
+  description    String?
+  location       String
+  propertyType   String       @default("APARTMENT")
+  unitCategories String?
+  priceMin       Float?
+  priceMax       Float?
+  status         String       @default("ACTIVE")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  leads          Lead[]
+  siteVisits     SiteVisit[]
+  bookings       Booking[]
+  metaMappings   MetaFormMapping[]
+
+  @@index([organizationId])
+  @@map("projects")
+}
+
+model Lead {
+  id                          String           @id @default(cuid())
+  organizationId              String
+  organization                Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId                   String?
+  project                     Project?         @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assignedToMemberId          String?
+  assignedMember              OrganizationMembership? @relation("AssignedLeads", fields: [assignedToMemberId], references: [id], onDelete: SetNull)
+  
+  name                        String
+  phone                       String
+  email                       String?
+  source                      String           @default("MANUAL")
+  sourceCampaign              String?
+  budgetMin                   Float?
+  budgetMax                   Float?
+  preferredLocation           String?
+  propertyType                String?
+  timeline                    String           @default("1_3_MONTHS")
+  priority                    LeadPriority     @default(MEDIUM)
+  temperature                 LeadTemperature  @default(WARM)
+  status                      LeadStatus       @default(NEW)
+  requirements                String?
+  notes                       String?
+  lastContactedAt             DateTime?
+  nextFollowUpAt              DateTime?
+  firstContactDurationSeconds Int?
+  metaLeadId                  String?
+  createdAt                   DateTime         @default(now())
+  updatedAt                   DateTime         @updatedAt
+
+  assignments                 LeadAssignment[]
+  activities                  LeadActivity[]
+  followUpTasks               FollowUpTask[]
+  siteVisits                  SiteVisit[]
+  bookings                    Booking[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, assignedToMemberId])
+  @@index([organizationId, phone])
+  @@index([organizationId, createdAt])
+  @@map("leads")
+}
+
+model LeadAssignment {
+  id             String                 @id @default(cuid())
+  organizationId String
+  leadId         String
+  lead           Lead                   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  memberId       String
+  member         OrganizationMembership @relation("MemberAssignments", fields: [memberId], references: [id], onDelete: Cascade)
+  assignedById   String?
+  reason         String                 @default("MANUAL")
+  createdAt      DateTime               @default(now())
+
+  @@index([organizationId])
+  @@index([leadId])
+  @@map("lead_assignments")
+}
+
+model LeadActivity {
+  id             String                  @id @default(cuid())
+  organizationId String
+  leadId         String
+  lead           Lead                    @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  memberId       String?
+  member         OrganizationMembership? @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  type           String
+  title          String
+  description    String?
+  metadata       String?
+  createdAt      DateTime                @default(now())
+
+  @@index([organizationId])
+  @@index([leadId])
+  @@map("lead_activities")
+}
+
+model FollowUpTask {
+  id                 String                 @id @default(cuid())
+  organizationId     String
+  leadId             String
+  lead               Lead                   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedToMemberId String
+  assignedMember     OrganizationMembership @relation(fields: [assignedToMemberId], references: [id], onDelete: Cascade)
+  title              String
+  scheduledAt        DateTime
+  completedAt        DateTime?
+  status             String                 @default("PENDING")
+  outcomeNotes       String?
+  createdAt          DateTime               @default(now())
+
+  @@index([organizationId, status])
+  @@index([leadId])
+  @@map("follow_up_tasks")
+}
+
+model SiteVisit {
+  id                 String                 @id @default(cuid())
+  organizationId     String
+  leadId             String
+  lead               Lead                   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId          String
+  project            Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  assignedToMemberId String
+  assignedMember     OrganizationMembership @relation(fields: [assignedToMemberId], references: [id], onDelete: Cascade)
+  scheduledAt        DateTime
+  completedAt        DateTime?
+  status             String                 @default("SCHEDULED")
+  feedback           String?
+  rating             Int?
+  createdAt          DateTime               @default(now())
+
+  @@index([organizationId, status])
+  @@index([leadId])
+  @@map("site_visits")
+}
+
+model Booking {
+  id              String                 @id @default(cuid())
+  organizationId  String
+  leadId          String
+  lead            Lead                   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  projectId       String
+  project         Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  memberId        String
+  member          OrganizationMembership @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  unitNumber      String
+  agreedDealValue Float
+  tokenAmount     Float?
+  bookingDate     DateTime               @default(now())
+  status          String                 @default("CONFIRMED")
+  notes           String?
+  createdAt       DateTime               @default(now())
+
+  @@index([organizationId])
+  @@index([leadId])
+  @@map("bookings")
+}
+
+model MetaConnection {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  metaPageId     String
+  pageName       String
+  accessToken    String
+  tokenExpiresAt DateTime?
+  status         String            @default("CONNECTED")
+  lastSyncAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  formMappings   MetaFormMapping[]
+
+  @@unique([organizationId, metaPageId])
+  @@map("meta_connections")
+}
+
+model MetaFormMapping {
+  id             String         @id @default(cuid())
+  organizationId String
+  connectionId   String
+  connection     MetaConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  metaFormId     String
+  formName       String
+  projectId      String?
+  project        Project?       @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  defaultSource  String         @default("FACEBOOK")
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+
+  @@unique([organizationId, metaFormId])
+  @@map("meta_form_mappings")
+}
+
+model WebhookEvent {
+  id             String        @id @default(cuid())
+  provider       String        @default("META")
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  eventType      String
+  payload        String
+  status         String        @default("PENDING")
+  retryCount     Int           @default(0)
+  error          String?
+  processedAt    DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([status])
+  @@map("webhook_events")
+}
+
+model AssignmentRule {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  projectId      String?
+  strategy       String       @default("ROUND_ROBIN")
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId])
+  @@map("assignment_rules")
+}
+
+model AuditLog {
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  userId         String?
+  user           User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action         String
+  resourceType   String
+  resourceId     String?
+  details        String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime      @default(now())
+
+  @@index([organizationId, createdAt])
+  @@map("audit_logs")
+}
+
+model Notification {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title          String
+  message        String
+  link           String?
+  isRead         Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, userId, isRead])
+  @@map("notifications")
+}
